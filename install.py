@@ -7,7 +7,7 @@ def main():
     base_path = Path(__file__).parent.absolute()
         
     # Use original download script
-    subprocess.run([sys.executable, "download_weights.py"], cwd=base_path)
+    # subprocess.run([sys.executable, "download_weights.py"], cwd=base_path)
 
 if __name__ == "__main__":
     main() 
