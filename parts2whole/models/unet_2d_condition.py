@@ -33,21 +33,38 @@ from diffusers.models.embeddings import (
     ImageHintTimeEmbedding,
     ImageProjection,
     ImageTimeEmbedding,
-    PositionNet,
+    # PositionNet,              # deprecated
     TextImageProjection,
     TextImageTimeEmbedding,
     TextTimeEmbedding,
     TimestepEmbedding,
     Timesteps,
 )
+
+## refer to https://github.com/MrForExample/ComfyUI-AnimateAnyone-Evolved/issues/25#issuecomment-2229886368
+## refer to https://github.com/huchenlei/ComfyUI-layerdiffuse/issues/86
+import diffusers
+if diffusers.__version__ >= '0.26':
+    from diffusers.models.embeddings import GLIGENTextBoundingboxProjection as PositionNet
+    from diffusers.models.unets.unet_2d_blocks import (
+        UNetMidBlock2D,
+        UNetMidBlock2DCrossAttn,
+        UNetMidBlock2DSimpleCrossAttn,
+        get_down_block,
+        get_up_block,
+    )
+else:
+    from diffusers.models.embeddings import PositionNet
+    from diffusers.models.unet_2d_blocks import (
+        UNetMidBlock2D,
+        UNetMidBlock2DCrossAttn,
+        UNetMidBlock2DSimpleCrossAttn,
+        get_down_block,
+        get_up_block,
+    )
+##
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unet_2d_blocks import (
-    UNetMidBlock2D,
-    UNetMidBlock2DCrossAttn,
-    UNetMidBlock2DSimpleCrossAttn,
-    get_down_block,
-    get_up_block,
-)
+
 from diffusers.utils import (
     USE_PEFT_BACKEND,
     BaseOutput,
@@ -748,7 +765,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
             )
 
-        def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
+        # TODO : remove debug
+        print(f"processor : {processor}")
+
+
+        def fn_recursive_attn_processor_deprecated(name: str, module: torch.nn.Module, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
                     module.set_processor(processor, _remove_lora=_remove_lora)
@@ -758,10 +779,28 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     )
 
             for sub_name, child in module.named_children():
+                fn_recursive_attn_processor_deprecated(f"{name}.{sub_name}", child, processor)
+
+        #TODO : Find a way to remove lora by other way
+        def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
+            if hasattr(module, "set_processor"):
+                if not isinstance(processor, dict):
+                    module.set_processor(processor)
+                else:
+                    module.set_processor(
+                        processor.pop(f"{name}.processor"))
+            for sub_name, child in module.named_children():
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
 
-        for name, module in self.named_children():
-            fn_recursive_attn_processor(name, module, processor)
+
+        if diffusers.__version__ >= "0.26.0":    
+            if _remove_lora:
+                raise ValueError("Removing lora by set_attn_processor is not supported in diffusers >= 0.25.0 Now.")
+            for name, module in self.named_children():
+                fn_recursive_attn_processor(name, module, processor)
+        else:
+            for name, module in self.named_children():
+                fn_recursive_attn_processor_deprecated(name, module, processor)
 
     def set_default_attn_processor(self):
         """
@@ -782,7 +821,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 f"Cannot call `set_default_attn_processor` when attention processors are of type {next(iter(self.attn_processors.values()))}"
             )
 
-        self.set_attn_processor(processor, _remove_lora=True)
+        if diffusers.__version__ > "0.25.0":
+            self.set_attn_processor(processor, _remove_lora=True)
+        else:
+            #TODO : removing lora by other way
+            self.set_attn_processor(processor)
 
     def set_attention_slice(self, slice_size):
         r"""
