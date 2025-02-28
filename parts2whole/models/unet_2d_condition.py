@@ -44,7 +44,8 @@ from diffusers.models.embeddings import (
 ## refer to https://github.com/MrForExample/ComfyUI-AnimateAnyone-Evolved/issues/25#issuecomment-2229886368
 ## refer to https://github.com/huchenlei/ComfyUI-layerdiffuse/issues/86
 import diffusers
-if diffusers.__version__ >= '0.26':
+__DIFFUSERS_BRANCH_TO_PROBLEM__ = '0.26.0'
+if diffusers.__version__ >= __DIFFUSERS_BRANCH_TO_PROBLEM__:
     from diffusers.models.embeddings import GLIGENTextBoundingboxProjection as PositionNet
     from diffusers.models.unets.unet_2d_blocks import (
         UNetMidBlock2D,
@@ -793,7 +794,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
 
 
-        if diffusers.__version__ >= "0.26.0":    
+        if diffusers.__version__ >= __DIFFUSERS_BRANCH_TO_PROBLEM__:    
             if _remove_lora:
                 raise ValueError("Removing lora by set_attn_processor is not supported in diffusers >= 0.25.0 Now.")
             for name, module in self.named_children():
