@@ -1116,8 +1116,8 @@ class Refs2ImagePipeline(
         # Encode and inject reference text embeddings
         for key, value in appearance.items():
             # Get text encode feature
-            prompt_embeds, neg_prompt_embeds = self.encode_prompt(
-                key,
+            pos_prompt_embeds, neg_prompt_embeds = self.encode_prompt(
+                prompt,
                 device,
                 1,
                 self.do_classifier_free_guidance,
@@ -1140,10 +1140,10 @@ class Refs2ImagePipeline(
                 value, height, width, device, num_images_per_prompt
             )
             if self.do_classifier_free_guidance:
-                text_embeds = torch.cat([neg_prompt_embeds, prompt_embeds])
+                text_embeds = torch.cat([neg_prompt_embeds, pos_prompt_embeds])
                 ref_latents = torch.cat([uncond_ref_latents, ref_latents])
                 mask = torch.cat([mask, mask])
-
+            
             self.reference_unet(
                 ref_latents,
                 ref_timesteps,
@@ -1166,6 +1166,21 @@ class Refs2ImagePipeline(
             prompt_embeds=prompt_embeds,
             negative_prompt_embeds=negative_prompt_embeds,
         )
+
+        # no prompt
+        no_prompt_embeds_d, no_neg_prompt_embeds_d = self.encode_prompt(
+            "",
+            device,
+            num_images_per_prompt,
+            self.do_classifier_free_guidance,
+            None,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+        )
+
+
+        print("prompt_embeds_d", prompt_embeds_d - no_prompt_embeds_d, prompt_embeds_d.shape)
+
         if self.do_classifier_free_guidance:
             prompt_embeds_d = torch.cat([neg_prompt_embeds_d, prompt_embeds_d])
         encoder_hidden_states.append(prompt_embeds_d)
