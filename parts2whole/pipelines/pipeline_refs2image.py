@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 from diffusers.configuration_utils import FrozenDict
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
 from diffusers.loaders import (
@@ -627,27 +628,105 @@ class Refs2ImagePipeline(
         do_normalize: bool = True,
         permute: bool = True,
     ):
-        img = np.array(image.convert("RGBA").resize((width, height)))
-        img = torch.from_numpy((img.astype(np.float32) / 255.0))
-        mask = img[..., 3:4]
+        
+        if isinstance(image, Image.Image):
+            
+            img = self.load_pil_image(image, height, width, permute, "RGBA")
+            mask = img[..., 3:4]
+            img = img[..., :3]
+
+            if permute: # (H, W, C) -> (C, H, W)
+                img = img.permute(2, 0, 1)
+                mask = mask.permute(2, 0, 1)
+        # if image is a tensor
+        elif isinstance(image, torch.Tensor):
+            img, permuted = self.load_tensor_image(image, height, width, permute, "RGBA")
+            assert len(img.shape) == 3, "image must be a 3D tensor" # ( C, H, W)
+
+            if img.shape[-1] == 4:  # (H, W, C)
+                
+                if permuted: # (H, W, C)
+                    mask = img[..., 3:4]
+                    img = img[..., :3]
+                else: # (C, H, W)
+                    mask = img[3:4]
+                    img = img[:3]
+            else:
+                if permuted: # (H, W, C)
+                    mask = torch.ones_like(img[..., :1])
+                else: # (C, H, W)
+                    mask = torch.ones_like(img[:1])
+            
+            if permuted and permute: # (H, W, C) -> (C, H, W)
+                img = img.permute(2,0,1)
+                mask = mask.permute(2,0,1)
+            elif not permuted and not permute: # (C, H, W) -> (H, W, C)
+                img = img.permute(1,2,0)
+                mask = mask.permute(1,2,0)
+                
         bg_color = self._get_bg_color(bg_color, return_tensor=True)
-        img = img[..., :3] * mask + bg_color * (1 - mask)
+        img = img * mask + bg_color * (1 - mask)
 
         if do_normalize:
             img = img * 2.0 - 1.0
 
-        if permute:
-            img = img.permute(2, 0, 1)
-            mask = mask.permute(2, 0, 1)
-
         return img, mask
 
-    def load_mask(self, mask_image: str, height: int, width: int, permute: bool = True):
-        mask = np.array(mask_image.convert("L").resize((width, height)))
-        mask = torch.from_numpy(mask.astype(np.float32) / 255.0).unsqueeze(-1)
+    def load_pil_image(self, image: Image.Image, height: int, width: int, image_type : str):
+        
+        img = np.array(image.convert(image_type).resize((width, height)))
+        img = torch.from_numpy((img.astype(np.float32) / 255.0))
 
-        if permute:
-            mask = mask.permute(2, 0, 1)
+        return img
+    
+    def load_tensor_image(self, image: torch.Tensor, height : int, width : int, image_type : str):
+        
+        C = {
+            "L" : 1,
+            "RGBA" : 4,
+            "RGB" : 3
+        }[image_type]
+        
+        channel_type = ["H", "W"]
+                
+        for i in range(len(image.shape)):
+            if image.shape[i] == C:
+                channel = i
+                channel_type.insert(i, "C")
+                break
+        else:
+            raise ValueError(f"Invalid image shape : {image.shape}")
+        
+        dimension_type = "".join(channel_type)
+        
+        assert dimension_type in ["HWC", "CHW"], "dimension_type must be either HWC or CHW"
+        
+        if image.dtype == torch.float32:
+            img = image
+        else:
+            img = image.to(torch.float32)
+
+        img = F.interpolate(img, size=(height, width), mode="bilinear")
+
+        if img.max() > 1.0:
+            img = img / 255.0
+        
+        return img, True if dimension_type == "HWC" else False
+        
+    def load_mask(self, mask_image: Image.Image | torch.Tensor, height: int, width: int, permute: bool = True):
+        if isinstance(mask_image, Image.Image):
+            mask = self.load_pil_image(mask_image, height, width, permute, "L")
+            if permute:
+                mask = mask.permute(2, 0, 1)
+            
+            # mask = np.array(mask_image.convert("L").resize((width, height)))
+            # mask = torch.from_numpy(mask.astype(np.float32) / 255.0).unsqueeze(-1)
+        elif isinstance(mask_image, torch.Tensor):
+            mask, permuted = self.load_tensor_image(mask_image, permute, "L")
+            if permuted and permute:
+                mask = mask.permute(2, 0, 1)
+            elif not permuted and not permute:
+                mask = mask.permute(1, 2, 0)
 
         return mask
 
